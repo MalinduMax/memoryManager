@@ -18,19 +18,37 @@ class MemoryController extends Controller
     public function allocate(Request $request)
     {
         $processSize = $request->input('size');
-
-        // For the Buddy System, we will assume sizes are powers of 2
         $block = null;
 
-        // Implementing the Buddy System
+        // Check if the requested size is a power of 2
+        if (!($processSize && !(($processSize) & ($processSize - 1)))) {
+            return back()->with('error', 'Requested size must be a power of 2!');
+        }
+
         // Find the smallest block that can accommodate the process size
         $block = MemoryBlock::where('allocated', false)
-            ->where('size', '>=', $this->nextPowerOfTwo($processSize))
+            ->where('size', '>=', $processSize)
             ->orderBy('size')
             ->first();
 
         if ($block) {
-            // Allocate memory block
+            // Split the block if it's larger than needed
+            while ($block->size > $processSize) {
+                $newSize = $block->size / 2;
+
+                // Create a new memory block for the buddy
+                MemoryBlock::create([
+                    'size' => $newSize,
+                    'allocated' => false,
+                    'allocated_to' => null,
+                ]);
+
+                // Update the current block size
+                $block->size = $newSize;
+                $block->save();
+            }
+
+            // Allocate the memory block
             $block->allocated = true;
             $block->allocated_to = "Process (Size: {$processSize})";
             $block->save();
@@ -49,20 +67,18 @@ class MemoryController extends Controller
         $block->allocated_to = null;
         $block->save();
 
+        // Check for buddy block to merge
+        $buddyBlock = MemoryBlock::where('size', $block->size)
+            ->where('allocated', false)
+            ->first();
+
+        if ($buddyBlock) {
+            // Merge with buddy block
+            $block->delete(); // Remove the current block
+            $buddyBlock->size *= 2; // Double the size of the buddy block
+            $buddyBlock->save();
+        }
+
         return back()->with('success', 'Memory block released!');
-    }
-
-    // Helper function to find the next power of two
-    private function nextPowerOfTwo($n)
-    {
-        if ($n && !($n & ($n - 1))) {
-            return $n; // n is already a power of 2
-        }
-
-        $power = 1;
-        while ($power < $n) {
-            $power <<= 1; // Shift left to get the next power of 2
-        }
-        return $power;
     }
 }
